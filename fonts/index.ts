@@ -1,0 +1,1 @@
+export { default as Futura } from "./futura-book.woff";
