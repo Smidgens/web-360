@@ -1,94 +1,137 @@
-import { createRef, FC, useEffect } from "react";
+import React, { createRef, FC, useEffect, useState } from "react";
 import styled from "styled-components";
 import { Box } from "@ui";
 import * as Babylon from "babylonjs";
 import { Engine, EngineOptions } from "babylonjs";
 
-
 const roptions:EngineOptions = {
 	preserveDrawingBuffer: true,
 	stencil: true,
 };
+type PanoramaOptions = {
+	src:string;
+};
 
-export const Panorama:FC = () => {
+
+const DEFAULT_FOV = 65;
+const FOV_STEP = 5;
+
+const MIN_FOV = 40;
+const MAX_FOV = 100;
+
+const ROT_SPEED = 1;
+
+const MIN_SPEED = 0.5;
+const MAX_SPEED = 1.25;
+const CAM_INERTIA = 0.7;
+
+class Mathf {
+
+	static readonly DEG_2_RAD:number = 0.01745329;
+	static readonly RAD_2_DEG:number = 57.29578;
+
+	static clamp = (v:number, min:number, max:number) => {
+		if(v < min){ return min; }
+		if(v > max){ return max; }
+		return v;
+	};
+
+	static lerp = (a:number, b:number, t:number) => {
+		return a + (b - a) * Mathf.clamp(t, 0, 1);
+	};
+
+	static inverseLerp = (a:number, b:number, v:number) => {
+		if(a != b){
+			return Mathf.clamp((v - a) / (b - a), 0, 1);
+		}
+		return 0;
+	};
+
+	private constructor(){}
+}
+
+// get camera speed for given fov value
+const speedForFOV = (fov:number) => {
+	var t = Mathf.inverseLerp(MIN_FOV, MAX_FOV, fov);
+	const speed = Mathf.lerp(MIN_SPEED, MAX_SPEED, t);
+	return speed;
+};
+
+export const Panorama:FC<PanoramaOptions> = props => {
+
+	const {
+		src
+	} = props;
 
 	const el = createRef<HTMLCanvasElement>();
-
 	useEffect(() => {
 		const canvas = el.current;
 		if(!canvas){ return; }
+
+		// init render context
 		const e = new Engine(canvas, true, roptions);
+		e.renderEvenInBackground = true;
 		const scene = new Babylon.Scene(e);
-		// const c = new Babylon.FreeCamera("c1", new Babylon.Vector3(0, 5, -10), scene);
-		// const c = new Babylon.FreeCamera("c1", new Babylon.Vector3(0, 0,0), scene);
-		const c = new Babylon.UniversalCamera("c1", new Babylon.Vector3(0, 0,0), scene);
-		// console.log(c.fov);
-		// c.fov = 2;
+
+		// init camera
+		const c = createCamera({
+			canvas,
+			scene
+		});
+
+		// movement smoothing
+		c.inertia = CAM_INERTIA;
+	
+		// make it drag-y
+		c.invertRotation = true;
+		c.inverseRotationSpeed = ROT_SPEED;
+
+		// init panorama dome
+		const dome = createImageDome({ src, scene });
 		
-		// c.fovMode = Babylon.FOVMODE_
+		// update cam rotation speed
+		const refreshSpeed = () => {
+			var fov = c.fov * Mathf.RAD_2_DEG;
+			c.inverseRotationSpeed = speedForFOV(fov);
+		};
 
-		// c.setTarget(Babylon.Vector3.Zero());
-		c.attachControl(canvas, false);
-		// scene.clearColor = new Babylon.Color4(0,0,0,0);
-		
-		// const light = new Babylon.HemisphericLight("l1", new Babylon.Vector3(0, 0, 0), scene);
-		
-		
-		// const m = new Babylon.BackgroundMaterial("stuff", scene);
+		const zoom = (sign:number) => {
+			const step = sign > 0 ? FOV_STEP : -FOV_STEP;
+			const cfov = c.fov * Mathf.RAD_2_DEG;
+			const nfov = Mathf.clamp(cfov + step, MIN_FOV, MAX_FOV);
+			c.fov = nfov * Mathf.DEG_2_RAD;
+		};
 
-		// m.diffuseTexture = new Babylon.Texture("https://assets.babylonjs.com/environments/backgroundGround.png", scene);
-
-		// const t = new Babylon.Texture("pano3.jpg", scene);;
-		// m.diffuseTexture.hasAlpha = true;
-		// m.opacityFresnel = false;
-		// m.shadowLevel = 0.4;
-		// m.primaryColor = new Babylon.Color3(1,0,0);
-
-		// var m = new Babylon.StandardMaterial("myMaterial", scene);
-		// m.diffuseTexture = t;
-		// m.emissiveTexture = t;
-		// m.disableLighting = true;
-
-		// m.emissiveColor = new Babylon.Color3(1,0,0);
-
-		const dome = new Babylon.PhotoDome("", "https://playground.babylonjs.com/textures/360photo.jpg", {}, scene);
-
-		dome.imageMode = Babylon.PhotoDome.MODE_MONOSCOPIC;
-
-		dome.fovMultiplier = 1;
-		
-		// const sphere = Babylon.MeshBuilder.CreateSphere("s1", {
-		// 	segments: 8,
-		// 	diameter: 20,
-		// 	sideOrientation: BABYLON.Mesh.BACKSIDE,
-			
-		// }, scene);
-		// sphere.scaling = new Babylon.Vector3(1,-1,1);
-		// sphere.material = m;
-
-		// sphere.position.y = 0;
-		// sphere.position.y = 1;
-
+		// window resize handler
 		const handleResize = () => {
 			e.resize();
 		};
 
-		const render = () => {
+		// render update
+		const handleRender = () => {
+			refreshSpeed();
 			scene.render();
 		};
 
-		window.addEventListener("resize", handleResize);
-
-		e.runRenderLoop(render);
-		e.renderEvenInBackground = true;
-
-		return () => {
-			window.removeEventListener("resize", handleResize);
-			e.stopRenderLoop();
+		// wheel / zoom
+		const handleWheel = (e:WheelEvent) => {
+			zoom(e.deltaY);
 		};
 
-	}, []);
+		// bind handlers
+		window.addEventListener("resize", handleResize);
+		window.addEventListener("wheel", handleWheel);
 
+		// start rendering
+		e.runRenderLoop(handleRender);
+
+		// remove handlers / cleanup
+		return () => {
+			window.removeEventListener("resize", handleResize);
+			window.removeEventListener("wheel", handleWheel);
+			e.stopRenderLoop();
+		};
+	}, []);
 
 	return (
 		<Root>
@@ -99,10 +142,34 @@ export const Panorama:FC = () => {
 
 const Root = styled(Box.Abs)`
 	overflow:hidden;
+	cursor:move;
 `;
-
 
 const StyledCanvas = styled.canvas`
 	width:100%;
 	height:100%;
 `;
+
+
+
+// create and add panorama image dome to scene
+const createImageDome = (opts:{
+	src:string,
+	scene:Babylon.Scene
+}):Babylon.PhotoDome => {
+	const dome = new Babylon.PhotoDome("", opts.src, {}, opts.scene);
+	dome.imageMode = Babylon.PhotoDome.MODE_MONOSCOPIC;
+	return dome;
+};
+
+// create and add camera to scene
+const createCamera = (opts:{
+	canvas:HTMLCanvasElement,
+	scene:Babylon.Scene
+}):Babylon.UniversalCamera => {
+
+	const c = new Babylon.UniversalCamera("c1", new Babylon.Vector3(0, 0,0), opts.scene);
+	c.attachControl(opts.canvas, false);
+	c.fov = DEFAULT_FOV * Mathf.DEG_2_RAD;
+	return c;
+};
