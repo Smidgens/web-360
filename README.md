@@ -3,7 +3,7 @@
 Simple 360 web viewer made with React and Babylon.js.
 
 
-[Demo](https://panorama.unnar.guru/?src=https://playground.babylonjs.com/textures/360photo.jpg)
+[Demo](https://360.unnar.guru/?src=https://playground.babylonjs.com/textures/360photo.jpg)
 
 **⌛ Planned**
 
